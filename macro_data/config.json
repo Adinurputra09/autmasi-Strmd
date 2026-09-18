@@ -1,0 +1,74 @@
+{
+  "excel_file": "D:\\macro\\data_request.xlsx",
+  "kolom_sku": "SKU",
+  "kolom_req": "Request Stock",
+  "default_qty": "10",
+  "target_exe_path": "C:\\Users\\adi nurputra\\AppData\\Local\\Microsoft\\WindowsApps\\MicrosoftCorporationII.WindowsSubsystemForAndroid_8wekyb3d8bbwe\\WsaClient.exe",
+  "target_launch_uri": "wsa://com.ruparupa.storemode.android",
+  "window_titles": "Storemode, ruparupa, WsaClient",
+  "stop_key": "esc",
+  "pause_key": "f9",
+  "kalibrasi_capture_key": "f8",
+  "posisi": {
+    "cari_sku": [
+      0.6475,
+      0.2561
+    ],
+    "req_stock": [
+      0.4376,
+      0.4966
+    ],
+    "submit": [
+      0.4693,
+      0.5908
+    ]
+  },
+  "aktifkan_auto_kalibrasi": true,
+  "template_half_w": 45,
+  "template_half_h": 25,
+  "match_threshold": 0.75,
+  "skala_uji": [
+    1.0,
+    0.95,
+    1.05,
+    0.9,
+    1.1
+  ],
+  "delay_countdown": 3.0,
+  "delay_load_sku": 2.5,
+  "delay_after_submit": 3.0,
+  "max_retry_fokus": 3,
+  "delay_retry_fokus": 1.0,
+  "max_retry_sku": 3,
+  "delay_retry_sku": 1.5,
+  "aktifkan_verifikasi": true,
+  "tesseract_cmd": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+  "ocr_region_notifikasi": [
+    0.2,
+    0.05,
+    0.8,
+    0.2
+  ],
+  "kata_kunci_sukses": [
+    "berhasil",
+    "success",
+    "sukses",
+    "terkirim",
+    "submitted"
+  ],
+  "kata_kunci_gagal": [
+    "gagal",
+    "error",
+    "invalid",
+    "tidak valid",
+    "failed",
+    "stok tidak"
+  ],
+  "diff_region_form": [
+    0.3,
+    0.45,
+    0.9,
+    0.65
+  ],
+  "diff_threshold": 12
+}

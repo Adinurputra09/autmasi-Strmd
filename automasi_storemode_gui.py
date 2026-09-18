@@ -1,4 +1,3 @@
-
 import os
 import sys
 import json
@@ -13,7 +12,6 @@ from logging.handlers import RotatingFileHandler
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-
 
 LIBRARY_WAJIB = [
     ("customtkinter", "customtkinter"),
@@ -45,6 +43,15 @@ def pastikan_semua_library_terinstal():
     tampilkan jendela kecil ("Automasi Panel by Adi Nurputra - Persiapan")
     dan install otomatis lewat pip satu per satu, dengan log & progress
     yang terlihat, sebelum panel utama dibuka."""
+
+    if getattr(sys, "frozen", False):
+        # Sedang berjalan sebagai file .exe hasil PyInstaller: semua library
+        # SUDAH dibundel di dalam exe, jadi auto-install via pip dilewati
+        # sepenuhnya. Ini WAJIB di-skip karena di dalam .exe, sys.executable
+        # adalah file exe aplikasi ini sendiri (bukan python.exe asli) --
+        # kalau tetap dipaksa pip install lewat sys.executable, aplikasi
+        # akan mencoba menjalankan dirinya sendiri dengan argumen yang salah.
+        return True
 
     daftar_cek = LIBRARY_WAJIB + LIBRARY_OPSIONAL
     belum_ada = [(m, p) for m, p in daftar_cek if not _modul_tersedia(m)]
@@ -178,7 +185,22 @@ except ImportError:
 # ==============================================================================
 # LOKASI FILE DATA (Konfigurasi, Kalibrasi, Riwayat, Log)
 # ==============================================================================
-BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data")
+def _lokasi_folder_aplikasi():
+    """Lokasi folder tempat aplikasi ini berada.
+
+    Saat berupa file .exe hasil PyInstaller (mode --onefile), __file__
+    menunjuk ke folder temporary (sys._MEIPASS) yang otomatis DIHAPUS
+    setiap aplikasi ditutup -- kalau dipakai untuk menyimpan data,
+    pengaturan/riwayat tidak akan pernah tersimpan permanen. Karena itu,
+    saat frozen (jadi .exe), lokasi diambil dari sys.executable (folder
+    tempat file .exe itu sendiri berada), bukan dari __file__.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+BASE_DIR = os.path.join(_lokasi_folder_aplikasi(), "macro_data")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "template_kalibrasi")
 PROGRESS_FILE = os.path.join(BASE_DIR, "progress_input.json")
@@ -429,6 +451,11 @@ class AutomationEngine:
         self.kalibrasi_batal_event = threading.Event()
         self.kalibrasi_thread = None
         self.kalibrasi_aktif = False
+        # status live untuk ditampilkan di tab Kalibrasi (dibaca lewat polling
+        # dari GUI, jadi tidak perlu update widget langsung dari thread lain)
+        self.kalibrasi_status = {"label": "", "pesan": "", "level": "info"}
+        self.kalibrasi_mouse_di_dalam = False
+        self.kalibrasi_jendela_terdeteksi = False
 
         if AUTOMASI_TERSEDIA:
             pyautogui.FAILSAFE = True
@@ -512,6 +539,26 @@ class AutomationEngine:
                 except Exception:
                     pass
         return None
+
+    def _cari_jendela_tanpa_aktivasi(self):
+        """Cari jendela aplikasi target TANPA memindah fokus/mengaktifkannya.
+        Dipakai khusus untuk kalibrasi manual (dicek berulang kali tiap ~80ms
+        untuk mengetahui posisi & batas jendela), supaya proses pengecekan
+        tidak mencuri fokus dari mana pun mouse pengguna sedang diarahkan."""
+        keywords = window_titles_list(self.cfg)
+        for title in gw.getAllTitles():
+            if any(k.lower() in title.lower() for k in keywords if k):
+                try:
+                    return gw.getWindowsWithTitle(title)[0]
+                except Exception:
+                    pass
+        return None
+
+    @staticmethod
+    def _titik_di_dalam_jendela(win, x, y):
+        if win is None:
+            return False
+        return (win.left <= x <= win.left + win.width) and (win.top <= y <= win.top + win.height)
 
     def jalankan_dan_deteksi_target(self, timeout=30):
         self.log.info("[*] Memeriksa apakah aplikasi target sudah terbuka...")
@@ -917,18 +964,28 @@ class AutomationEngine:
     def mulai_kalibrasi(self, on_progress, on_selesai):
         """Kalibrasi interaktif: untuk tiap target, tunggu pengguna arahkan
         mouse lalu tekan tombol capture (default F8). on_progress dipanggil
-        tiap update (label target, koordinat mouse). on_selesai(hasil_posisi_atau_None)
-        dipanggil di akhir."""
+        tiap update (label target, koordinat mouse, status). on_selesai(hasil_posisi_atau_None)
+        dipanggil di akhir.
+
+        PENTING: posisi HANYA dibaca relatif terhadap jendela aplikasi target
+        yang sedang dikalibrasi. Kalau saat menekan tombol capture ternyata
+        mouse berada di LUAR jendela aplikasi target (misalnya tanpa sengaja
+        tercampur ke desktop/jendela lain), posisi tersebut DITOLAK -- tidak
+        disimpan -- supaya tidak menghasilkan koordinat yang salah/error saat
+        automasi berjalan nanti."""
         if self.kalibrasi_aktif:
             return
         self.kalibrasi_batal_event.clear()
         self.kalibrasi_aktif = True
 
+        def _set_status(label, pesan, level="info"):
+            self.kalibrasi_status = {"label": label, "pesan": pesan, "level": level}
+
         def _thread():
-            posisi_baru = {}
             win = self._dapatkan_jendela_target()
             if win is None:
                 self.log.warning("[!] Aplikasi target belum terdeteksi. Buka aplikasinya dahulu sebelum kalibrasi.")
+                _set_status("", "Aplikasi target belum terdeteksi. Buka aplikasinya dahulu.", "error")
                 self.kalibrasi_aktif = False
                 on_selesai(None)
                 return
@@ -937,25 +994,71 @@ class AutomationEngine:
             stop_key = self.cfg["stop_key"]
 
             for key, label in TARGET_LIST:
+                _set_status(label, f"Arahkan mouse ke: {label}  (di DALAM jendela aplikasi target)", "info")
                 on_progress(label=label, key=key, mouse=pyautogui.position())
                 tertangkap = False
                 while not tertangkap:
                     if self.kalibrasi_batal_event.is_set():
                         self.log.warning("[!] Kalibrasi dibatalkan oleh pengguna.")
+                        self.log.info("    (posisi yang sempat berhasil ditangkap tetap tersimpan)")
+                        _set_status(label, "Kalibrasi dibatalkan. Posisi yang sudah ditangkap tetap tersimpan.", "error")
                         self.kalibrasi_aktif = False
                         on_selesai(None)
                         return
                     if keyboard.is_pressed(stop_key):
                         self.log.warning("[!] Kalibrasi dibatalkan oleh pengguna (tombol stop).")
+                        self.log.info("    (posisi yang sempat berhasil ditangkap tetap tersimpan)")
+                        _set_status(label, "Kalibrasi dibatalkan. Posisi yang sudah ditangkap tetap tersimpan.", "error")
                         self.kalibrasi_aktif = False
                         on_selesai(None)
                         return
+
+                    # Cek posisi jendela target & posisi mouse TANPA mengaktifkan
+                    # jendela (supaya tidak mencuri fokus tiap ~80ms saat menunggu).
+                    win_cek = self._cari_jendela_tanpa_aktivasi()
+                    mouse_x, mouse_y = pyautogui.position()
+                    di_dalam = self._titik_di_dalam_jendela(win_cek, mouse_x, mouse_y)
+                    self.kalibrasi_jendela_terdeteksi = win_cek is not None
+                    self.kalibrasi_mouse_di_dalam = di_dalam
+
                     if keyboard.is_pressed(capture_key):
-                        win_terbaru = self._dapatkan_jendela_target() or win
-                        mouse_x, mouse_y = pyautogui.position()
+                        if win_cek is None:
+                            self.log.warning(f"[!] Kalibrasi '{label}': aplikasi target tidak terdeteksi saat capture ditekan.")
+                            _set_status(label, "Aplikasi target tidak terdeteksi! Pastikan aplikasi masih terbuka.", "error")
+                            while keyboard.is_pressed(capture_key):
+                                time.sleep(0.05)
+                            continue
+
+                        if not di_dalam:
+                            # INI PERBAIKANNYA: tolak posisi yang berada di luar
+                            # jendela aplikasi target (misal tercampur ke desktop),
+                            # supaya tidak tersimpan sebagai koordinat yang salah.
+                            self.log.warning(
+                                f"[!] Kalibrasi '{label}': posisi mouse ({mouse_x}, {mouse_y}) berada DI LUAR "
+                                f"jendela aplikasi target -- diabaikan, tidak disimpan."
+                            )
+                            _set_status(
+                                label,
+                                "Posisi mouse di LUAR jendela aplikasi target! Arahkan ke dalam "
+                                "aplikasi target, lalu tekan tombol capture lagi.",
+                                "error",
+                            )
+                            while keyboard.is_pressed(capture_key):
+                                time.sleep(0.05)
+                            continue
+
+                        # Posisi valid: berada di dalam jendela aplikasi target.
+                        win_terbaru = win_cek
                         rel_x = round(min(max((mouse_x - win_terbaru.left) / max(win_terbaru.width, 1), 0.0), 1.0), 4)
                         rel_y = round(min(max((mouse_y - win_terbaru.top) / max(win_terbaru.height, 1), 0.0), 1.0), 4)
-                        posisi_baru[key] = [rel_x, rel_y]
+
+                        # LANGSUNG disimpan ke config & ditulis ke disk saat itu juga
+                        # (bukan menunggu ketiga target selesai) -- supaya kalau
+                        # aplikasi ditutup atau kalibrasi terhenti di tengah jalan,
+                        # posisi yang sudah berhasil ditangkap tetap aman tersimpan
+                        # dan akan otomatis dipakai lagi saat aplikasi dibuka ulang.
+                        self.cfg["posisi"][key] = [rel_x, rel_y]
+                        simpan_config(self.cfg)
 
                         if CV_TERSEDIA:
                             try:
@@ -964,25 +1067,43 @@ class AutomationEngine:
                             except Exception as e:
                                 self.log.warning(f"    -> Gagal simpan template untuk '{label}': {e}")
 
-                        self.log.info(f"[+] Ditangkap: {label} = ({rel_x}, {rel_y})")
+                        self.log.info(f"[+] Ditangkap & disimpan: {label} = ({rel_x}, {rel_y})")
+                        _set_status(label, f"'{label}' berhasil ditangkap & disimpan di ({rel_x}, {rel_y}).", "sukses")
                         while keyboard.is_pressed(capture_key):
                             time.sleep(0.05)
                         tertangkap = True
                     else:
-                        on_progress(label=label, key=key, mouse=pyautogui.position())
+                        on_progress(label=label, key=key, mouse=(mouse_x, mouse_y), di_dalam=di_dalam)
                         time.sleep(0.08)
 
-            self.cfg["posisi"] = posisi_baru
-            simpan_config(self.cfg)
-            self.log.info("[+] Kalibrasi manual selesai & disimpan.")
+            self.log.info("[+] Kalibrasi manual selesai. Semua posisi sudah tersimpan.")
+            _set_status("", "Kalibrasi selesai. Semua posisi sudah tersimpan.", "sukses")
             self.kalibrasi_aktif = False
-            on_selesai(posisi_baru)
+            on_selesai(dict(self.cfg["posisi"]))
 
         self.kalibrasi_thread = threading.Thread(target=_thread, daemon=True)
         self.kalibrasi_thread.start()
 
     def batalkan_kalibrasi(self):
         self.kalibrasi_batal_event.set()
+
+    def reset_kalibrasi_default(self):
+        """Kembalikan posisi kalibrasi ke nilai bawaan (default pabrik) dan
+        hapus template hasil auto-kalibrasi supaya tidak ada sisa data lama
+        yang keliru. Perubahan langsung disimpan ke disk."""
+        self.cfg["posisi"] = json.loads(json.dumps(DEFAULT_CONFIG["posisi"]))
+        simpan_config(self.cfg)
+
+        for key, _label in TARGET_LIST:
+            path = os.path.join(TEMPLATE_DIR, f"template_{key}.png")
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+
+        self.log.info("[+] Kalibrasi direset ke pengaturan default.")
+        return self.cfg["posisi"]
 
 
 # ==============================================================================
@@ -1023,7 +1144,7 @@ class DashboardFrame(ctk.CTkFrame):
 
         self.grid_columnconfigure((0, 1, 2), weight=1)
 
-        judul = ctk.CTkLabel(self, text="Kontrol", font=ctk.CTkFont(size=22, weight="bold"))
+        judul = ctk.CTkLabel(self, text="Kontrol Otomasi", font=ctk.CTkFont(size=22, weight="bold"))
         judul.grid(row=0, column=0, columnspan=3, sticky="w", padx=4, pady=(0, 16))
 
         # --- kartu status
@@ -1217,7 +1338,7 @@ class PengaturanFrame(ctk.CTkFrame):
             info_lib.append("pytesseract (opsional)")
         if info_lib:
             teks_info = "Library belum terpasang: " + ", ".join(info_lib)
-            ctk.CTkLabel(scroll, text=teks_info, text_color=WARNA_WARN, wraplength=700, justify="left").pack(anchor="w", pady=(12, 0))
+            ctk.CTkLabel(scroll, text=teks_info, text_color=WARNA_WARN, wraplength=540, justify="left").pack(anchor="w", pady=(12, 0))
 
         btn_simpan = ctk.CTkButton(
             self, text="💾  Simpan Pengaturan", height=42, corner_radius=10,
@@ -1313,7 +1434,7 @@ class KalibrasiFrame(ctk.CTkFrame):
             f"Untuk tiap target di bawah: buka & arahkan aplikasi target, arahkan kursor mouse ke posisi yang "
             f"tepat, lalu tekan tombol keyboard [{capture_key}]. Tekan [{stop_key}] kapan saja untuk membatalkan."
         )
-        ctk.CTkLabel(self, text=teks_info, wraplength=760, justify="left", text_color=("gray30", "gray70")).pack(anchor="w", pady=(0, 16))
+        ctk.CTkLabel(self, text=teks_info, wraplength=560, justify="left", text_color=("gray30", "gray70")).pack(anchor="w", pady=(0, 16))
 
         self.kartu_posisi = {}
         frame_target = ctk.CTkFrame(self, fg_color="transparent")
@@ -1325,9 +1446,14 @@ class KalibrasiFrame(ctk.CTkFrame):
         self._perbarui_kartu_posisi()
 
         self.label_progress_kalibrasi = ctk.CTkLabel(
-            self, text="Klik 'Mulai Kalibrasi' untuk memulai.", font=ctk.CTkFont(size=15, weight="bold")
+            self, text="Klik 'Mulai Kalibrasi' untuk memulai.", font=ctk.CTkFont(size=15, weight="bold"),
+            wraplength=560, justify="left",
         )
         self.label_progress_kalibrasi.pack(anchor="w", pady=(8, 4))
+
+        self.label_indikator = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=13, weight="bold"),
+                                             wraplength=560, justify="left")
+        self.label_indikator.pack(anchor="w", pady=(0, 4))
 
         self.label_mouse = ctk.CTkLabel(self, text="Posisi mouse: -", text_color=("gray40", "gray60"))
         self.label_mouse.pack(anchor="w", pady=(0, 16))
@@ -1344,7 +1470,14 @@ class KalibrasiFrame(ctk.CTkFrame):
             frame_tombol, text="✕  Batalkan", height=42, corner_radius=10, width=140,
             fg_color=WARNA_GAGAL, hover_color="#c0392b", command=self._batalkan_kalibrasi, state="disabled",
         )
-        self.btn_batal_kalibrasi.pack(side="left")
+        self.btn_batal_kalibrasi.pack(side="left", padx=(10, 0))
+
+        self.btn_reset_default = ctk.CTkButton(
+            frame_tombol, text="↺  Reset ke Default", height=42, corner_radius=10, width=170,
+            fg_color="transparent", border_width=2, border_color=WARNA_WARN, text_color=WARNA_WARN,
+            hover_color=("gray85", "gray22"), command=self._reset_default,
+        )
+        self.btn_reset_default.pack(side="left", padx=(10, 0))
 
         self._polling_aktif = False
 
@@ -1362,43 +1495,71 @@ class KalibrasiFrame(ctk.CTkFrame):
         self.btn_batal_kalibrasi.configure(state="normal")
         self._polling_aktif = True
 
-        def on_progress(label, key, mouse):
-            pass  # progress teks diperbarui lewat polling _poll_progress di bawah
+        def on_progress(**kwargs):
+            pass  # semua status ditampilkan lewat polling _poll_progress di bawah (baca dari engine)
 
         def on_selesai(hasil):
             self._polling_aktif = False
             self.btn_mulai_kalibrasi.configure(state="normal")
             self.btn_batal_kalibrasi.configure(state="disabled")
             self._perbarui_kartu_posisi()
+            self.label_indikator.configure(text="")
             if hasil:
                 self.label_progress_kalibrasi.configure(text="✓ Kalibrasi selesai & tersimpan.", text_color=WARNA_SUKSES)
             else:
                 self.label_progress_kalibrasi.configure(text="Kalibrasi dibatalkan / gagal.", text_color=WARNA_WARN)
 
-        self._target_index_terakhir = None
         self.engine.mulai_kalibrasi(on_progress, on_selesai)
         self._poll_progress()
 
     def _poll_progress(self):
         if not self._polling_aktif:
             return
+
         if AUTOMASI_TERSEDIA:
             try:
                 x, y = pyautogui.position()
                 self.label_mouse.configure(text=f"Posisi mouse: ({x}, {y})")
             except Exception:
                 pass
-        # tampilkan target yang sedang menunggu ditangkap (heuristik sederhana:
-        # target pertama yang posisinya belum sama dengan hasil terakhir)
-        capture_key = self.cfg["kalibrasi_capture_key"].upper()
+
+        # Pesan/instruksi terakhir dari engine (termasuk pesan error validasi posisi)
+        status = self.engine.kalibrasi_status
+        warna_peta = {"info": WARNA_INFO, "error": WARNA_GAGAL, "sukses": WARNA_SUKSES}
         self.label_progress_kalibrasi.configure(
-            text=f"Arahkan mouse ke target yang diminta lalu tekan [{capture_key}]  (lihat log di tab Kontrol)",
-            text_color=WARNA_INFO,
+            text=status.get("pesan", ""), text_color=warna_peta.get(status.get("level", "info"), WARNA_INFO)
         )
-        self.after(150, self._poll_progress)
+
+        # Indikator live: apakah mouse SAAT INI ada di dalam jendela aplikasi target.
+        # Ini yang mencegah kalibrasi "tercampur" dengan tampilan desktop/jendela lain --
+        # pengguna langsung tahu sebelum menekan tombol capture, bukan setelah gagal.
+        if not self.engine.kalibrasi_jendela_terdeteksi:
+            self.label_indikator.configure(text="✗ Jendela aplikasi target tidak terdeteksi", text_color=WARNA_GAGAL)
+        elif self.engine.kalibrasi_mouse_di_dalam:
+            self.label_indikator.configure(text="✓ Mouse berada di dalam jendela aplikasi target", text_color=WARNA_SUKSES)
+        else:
+            self.label_indikator.configure(text="✗ Mouse berada DI LUAR jendela aplikasi target — pindahkan dulu ke dalam aplikasi", text_color=WARNA_GAGAL)
+
+        self.after(100, self._poll_progress)
 
     def _batalkan_kalibrasi(self):
         self.engine.batalkan_kalibrasi()
+
+    def _reset_default(self):
+        if self.engine.kalibrasi_aktif:
+            messagebox.showwarning("Kalibrasi Sedang Berjalan", "Hentikan/batalkan kalibrasi yang sedang berjalan terlebih dahulu.")
+            return
+        if not messagebox.askyesno(
+            "Reset ke Default",
+            "Ini akan mengembalikan SEMUA posisi kalibrasi ke pengaturan bawaan (default) "
+            "dan menghapus template auto-kalibrasi yang tersimpan.\n\n"
+            "Posisi hasil kalibrasi manual kamu saat ini akan hilang. Lanjutkan?",
+        ):
+            return
+        self.engine.reset_kalibrasi_default()
+        self._perbarui_kartu_posisi()
+        self.label_progress_kalibrasi.configure(text="✓ Kalibrasi dikembalikan ke pengaturan default.", text_color=WARNA_SUKSES)
+        self.label_indikator.configure(text="")
 
 
 class HistoryFrame(ctk.CTkFrame):
@@ -1481,12 +1642,14 @@ class App(ctk.CTk):
         self.engine = AutomationEngine(self.cfg, self.logger, self.log_queue, on_status_change=self._on_status_change)
 
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
+        self.sidebar_terlihat = True
+        self._buat_topbar()
         self._buat_sidebar()
 
         self.container = ctk.CTkFrame(self, fg_color="transparent")
-        self.container.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.container.grid(row=1, column=1, sticky="nsew", padx=20, pady=20)
         self.container.grid_columnconfigure(0, weight=1)
         self.container.grid_rowconfigure(0, weight=1)
 
@@ -1501,15 +1664,38 @@ class App(ctk.CTk):
         self._tampilkan("dashboard")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _buat_sidebar(self):
-        sidebar = ctk.CTkFrame(self, width=190, corner_radius=0, fg_color=("gray92", "gray14"))
-        sidebar.grid(row=0, column=0, sticky="nsw")
-        sidebar.grid_propagate(False)
+    def _buat_topbar(self):
+        """Bar tipis di atas berisi tombol hamburger (☰) untuk menampilkan/
+        menyembunyikan menu sidebar. Selalu terlihat apapun status sidebar,
+        supaya menu bisa dimunculkan lagi kapan saja."""
+        topbar = ctk.CTkFrame(self, height=46, corner_radius=0, fg_color=("gray88", "gray10"))
+        topbar.grid(row=0, column=0, columnspan=2, sticky="ew")
+        topbar.grid_propagate(False)
 
-        ctk.CTkLabel(sidebar, text="⚙ Automasi\nPanel", font=ctk.CTkFont(size=19, weight="bold"),
-                     justify="left").pack(anchor="w", padx=18, pady=(24, 2))
-        ctk.CTkLabel(sidebar, text="by Adi Nurputra", font=ctk.CTkFont(size=11),
-                     text_color=("gray40", "gray60"), justify="left").pack(anchor="w", padx=18, pady=(0, 20))
+        self.btn_hamburger = ctk.CTkButton(
+            topbar, text="☰", width=40, height=34, corner_radius=8,
+            fg_color="transparent", hover_color=("gray75", "gray25"),
+            text_color=("gray10", "gray90"), font=ctk.CTkFont(size=18, weight="bold"),
+            command=self._toggle_sidebar,
+        )
+        self.btn_hamburger.pack(side="left", padx=(10, 8), pady=6)
+
+        ctk.CTkLabel(topbar, text="⚙ Automasi Panel by Adi Nurputra",
+                     font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+
+    def _toggle_sidebar(self):
+        """Tampilkan/sembunyikan menu sidebar tiap tombol hamburger diklik."""
+        if self.sidebar_terlihat:
+            self.sidebar.grid_remove()
+            self.sidebar_terlihat = False
+        else:
+            self.sidebar.grid(row=1, column=0, sticky="nsw")
+            self.sidebar_terlihat = True
+
+    def _buat_sidebar(self):
+        self.sidebar = ctk.CTkFrame(self, width=190, corner_radius=0, fg_color=("gray92", "gray14"))
+        self.sidebar.grid(row=1, column=0, sticky="nsw")
+        self.sidebar.grid_propagate(False)
 
         self.tombol_nav = {}
         menu = [
@@ -1520,17 +1706,17 @@ class App(ctk.CTk):
         ]
         for key, teks in menu:
             btn = ctk.CTkButton(
-                sidebar, text=teks, anchor="w", height=44, corner_radius=10,
+                self.sidebar, text=teks, anchor="w", height=44, corner_radius=10,
                 fg_color="transparent", text_color=("gray20", "gray90"),
                 hover_color=("gray80", "gray25"), font=ctk.CTkFont(size=14),
                 command=lambda k=key: self._tampilkan(k),
             )
-            btn.pack(fill="x", padx=14, pady=4)
+            btn.pack(fill="x", padx=14, pady=(20 if key == "dashboard" else 4, 4))
             self.tombol_nav[key] = btn
 
         status_lib = "Siap" if AUTOMASI_TERSEDIA and pd is not None else "Cek Pengaturan"
         warna = WARNA_SUKSES if AUTOMASI_TERSEDIA and pd is not None else WARNA_WARN
-        ctk.CTkLabel(sidebar, text=f"● {status_lib}", text_color=warna,
+        ctk.CTkLabel(self.sidebar, text=f"● {status_lib}", text_color=warna,
                      font=ctk.CTkFont(size=12)).pack(side="bottom", pady=20)
 
     def _tampilkan(self, key):

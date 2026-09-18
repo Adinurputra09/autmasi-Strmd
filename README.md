@@ -13,7 +13,6 @@ Awalnya berupa skrip CLI (`auto_storemode_v4.py`), kini dibungkus menjadi panel 
 - **Resume otomatis** — bila proses terhenti di tengah jalan, sesi berikutnya bisa melanjutkan dari SKU terakhir.
 - **Verifikasi hasil submit** — opsional, memakai OCR (Tesseract) dan perbandingan screenshot untuk memastikan submit berhasil/gagal.
 - **Auto-install dependensi** — saat pertama dijalankan, semua library Python yang dibutuhkan otomatis dicek & diinstall lewat pip, lengkap dengan progress window.
-- **Tampilan modern** — dibangun dengan [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter), sidebar navigasi, dark mode.
 
 ## 🖥️ Kebutuhan Sistem
 
@@ -66,4 +65,3 @@ Proyek ini dibuat untuk kebutuhan otomasi internal/pribadi. Gunakan sesuai kebij
 ## 👤 Dibuat oleh
 
 **Adi Nurputra**
-# autmasi-storemode

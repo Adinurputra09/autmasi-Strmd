@@ -1,6 +1,6 @@
 # Automasi Panel by Adi Nurputra
 
-Aplikasi desktop (Windows) dengan antarmuka GUI modern untuk mengotomasi proses input stok/SKU ke aplikasi Storemode (Ruparupa) yang berjalan di Windows Subsystem for Android (WSA) — atau aplikasi Windows lain sejenis yang bisa dikendalikan lewat klik posisi relatif pada jendela.
+Aplikasi desktop (Windows) dengan antarmuka GUI modern untuk mengotomasi proses input stok/SKU ke aplikasi Storemode () yang berjalan di Windows Subsystem for Android (WSA) — atau aplikasi Windows lain sejenis yang bisa dikendalikan lewat klik posisi relatif pada jendela.
 
 Awalnya berupa skrip CLI (`auto_storemode_v4.py`), kini dibungkus menjadi panel GUI lengkap dengan kontrol Start/Pause/Stop, pengaturan, kalibrasi visual, riwayat proses, dan auto-install dependensi.
 

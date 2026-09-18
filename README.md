@@ -2,7 +2,7 @@
 
 Aplikasi desktop (Windows) dengan antarmuka GUI modern untuk mengotomasi proses input stok/SKU ke aplikasi Storemode () yang berjalan di Windows Subsystem for Android (WSA) — atau aplikasi Windows lain sejenis yang bisa dikendalikan lewat klik posisi relatif pada jendela.
 
-Awalnya berupa skrip CLI (`auto_storemode_v4.py`), kini dibungkus menjadi panel GUI lengkap dengan kontrol Start/Pause/Stop, pengaturan, kalibrasi visual, riwayat proses, dan auto-install dependensi.
+
 
 ## ✨ Fitur
 
@@ -20,6 +20,8 @@ Awalnya berupa skrip CLI (`auto_storemode_v4.py`), kini dibungkus menjadi panel 
 - Python 3.9+ (bila menjalankan dari source, bukan dari `.exe`).
 - Koneksi internet saat pertama kali dijalankan (untuk auto-install library).
 - (Opsional) [Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki) untuk fitur verifikasi hasil submit lewat OCR.
+- download emulator android wsa https://github.com/MustardChef/WSABuilds
+- cara instalasinya cek di youtube https://youtu.be/GmdrCth_gvk?si=KNx-DKNZclkoZE-S
 
 ## 🚀 Instalasi & Menjalankan
 

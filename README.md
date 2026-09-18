@@ -22,6 +22,7 @@ Aplikasi desktop (Windows) dengan antarmuka GUI modern untuk mengotomasi proses 
 - (Opsional) [Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki) untuk fitur verifikasi hasil submit lewat OCR.
 - download emulator android wsa https://github.com/MustardChef/WSABuilds
 - cara instalasinya cek di youtube https://youtu.be/GmdrCth_gvk?si=KNx-DKNZclkoZE-S
+- install python download web resmi versi 3.9++
 
 ## 🚀 Instalasi & Menjalankan
 

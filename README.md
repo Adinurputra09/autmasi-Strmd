@@ -1,4 +1,4 @@
-# Automasi Panel by Adi Nurputra
+# Automasi by Adi Nurputra
 
 Aplikasi desktop (Windows) dengan antarmuka GUI modern untuk mengotomasi proses input stok/SKU ke aplikasi Storemode () yang berjalan di Windows Subsystem for Android (WSA) — atau aplikasi Windows lain sejenis yang bisa dikendalikan lewat klik posisi relatif pada jendela.
 

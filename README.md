@@ -28,8 +28,8 @@ Aplikasi desktop (Windows) dengan antarmuka GUI modern untuk mengotomasi proses 
 ### Opsi 1 — Jalankan dari source
 
 ```bash
-git clone https://github.com/<username>/<nama-repo>.git
-cd <nama-repo>
+https://github.com/Adinurputra09/autmasi-Strmd.git
+cd automasi-strmd
 python automasi_storemode_gui.py
 ```
 

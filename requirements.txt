@@ -1,0 +1,16 @@
+# Wajib
+customtkinter
+pandas
+openpyxl
+pyautogui
+pyperclip
+pygetwindow
+keyboard
+pillow
+
+# Opsional (fitur auto-kalibrasi/template matching)
+opencv-python
+numpy
+
+# Opsional (fitur verifikasi OCR hasil submit)
+pytesseract
